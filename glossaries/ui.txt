@@ -1,4 +1,4 @@
-# Exact-match UI phrasebook: if a whole text block is exactly one of these, Veil uses this
+# Exact-match UI phrasebook: if a whole text block is exactly one of these, Lacyan Translator uses this
 # translation instantly instead of asking the model. Short menu words are where models guess wrong.
 # Format: source = translation
 

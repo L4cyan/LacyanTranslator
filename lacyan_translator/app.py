@@ -20,11 +20,11 @@ from .hotkeys import Hotkeys
 from .langs import TARGETS
 from .overlay import Overlay
 
-log = logging.getLogger("veil")
+log = logging.getLogger("lacyan")
 
 
 def setup_logging() -> None:
-    handler = RotatingFileHandler(data_path("veil.log"), maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+    handler = RotatingFileHandler(data_path("lacyan.log"), maxBytes=1_000_000, backupCount=2, encoding="utf-8")
     logging.basicConfig(level=logging.INFO, handlers=[handler], format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
@@ -52,7 +52,7 @@ class Bridge(QObject):
     call = Signal(object)
 
 
-class VeilApp:
+class TranslatorApp:
     def __init__(self, app: QApplication) -> None:
         self.app = app
         self.cfg = Config.load()
@@ -67,7 +67,7 @@ class VeilApp:
         self.overlay_on = True
 
         self.tray = QSystemTrayIcon(make_icon(), app)
-        self.tray.setToolTip(f"Veil {__version__} · starting")
+        self.tray.setToolTip(f"Lacyan Translator {__version__} · starting")
         self._build_menu()
         self.tray.show()
 
@@ -83,14 +83,14 @@ class VeilApp:
         local_ollama = "127.0.0.1:11434" in self.cfg.endpoint or "localhost:11434" in self.cfg.endpoint
         if local_ollama and self.cfg.model == model_setup.MODEL_NAME:
             if model_setup.ollama_models() is None:
-                self._notify("Ollama isn't running", "Start Ollama, then Veil will connect automatically.")
+                self._notify("Ollama isn't running", "Start Ollama, then Lacyan Translator will connect automatically.")
                 while model_setup.ollama_models() is None:
                     threading.Event().wait(5)
             if not any(m.split(":")[0] == self.cfg.model for m in model_setup.ollama_models() or []):
                 self._notify("Setting up", "Downloading the translation model (about 1.9 GB, first run only)…")
                 result = model_setup.ensure_model()
                 if result not in ("ok", "created"):
-                    self._notify("Model setup failed", "See data/veil.log for details.")
+                    self._notify("Model setup failed", "See data/lacyan.log for details.")
                     return
         self.bridge.call.emit(self._start_engine)
 
@@ -100,7 +100,7 @@ class VeilApp:
         self.engine.status.connect(self._status)
         self.overlay.show()
         self.engine.start()
-        self._notify("Veil is running", f"Translating {self.cfg.source_language} → {self.cfg.target_language}. "
+        self._notify("Lacyan Translator is running", f"Translating {self.cfg.source_language} → {self.cfg.target_language}. "
                      f"{self.cfg.hotkey_toggle.upper()} shows the original, {self.cfg.hotkey_pause.upper()} pauses.")
         QTimer.singleShot(4000, self._check_capture_hidden)
 
@@ -191,23 +191,23 @@ class VeilApp:
         self.app.quit()
 
     def _status(self, text: str) -> None:
-        self.tray.setToolTip(f"Veil {__version__} · {text}")
+        self.tray.setToolTip(f"Lacyan Translator {__version__} · {text}")
         if "error" in text.lower() or "failed" in text.lower():
             self.status_action.setText(text[:80])
 
     def _notify(self, title: str, body: str) -> None:
-        self.bridge.call.emit(lambda: self.tray.showMessage(f"Veil · {title}", body, make_icon(), 6000))
+        self.bridge.call.emit(lambda: self.tray.showMessage(f"Lacyan Translator · {title}", body, make_icon(), 6000))
 
 
 def run() -> int:
     setup_logging()
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\VeilScreenTranslator")
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\LacyanTranslator")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
         return 0
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-    app.setApplicationName("Veil")
-    veil = VeilApp(app)  # noqa: F841 (kept alive by the event loop)
+    app.setApplicationName("Lacyan Translator")
+    translator_app = TranslatorApp(app)  # noqa: F841 (kept alive by the event loop)
     code = app.exec()
     ctypes.windll.kernel32.CloseHandle(mutex)
     return code

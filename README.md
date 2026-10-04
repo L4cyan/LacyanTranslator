@@ -1,8 +1,8 @@
-# Veil
+# Lacyan Translator
 
 **Live on-screen translation for games and apps, running entirely on your own PC.**
 
-Veil watches your screen, finds Chinese text, translates it with a local AI model, and paints the
+Lacyan Translator watches your screen, finds Chinese text, translates it with a local AI model, and paints the
 translation right where the original was, over a soft blur that hides the original text. Nothing is
 injected into the game, nothing is sent to the cloud, and there's nothing to configure: start it and play.
 
@@ -11,7 +11,7 @@ injected into the game, nothing is sent to the cloud, and there's nothing to con
 ## Why another screen translator?
 
 Most OCR translators make you draw a box, show results in a separate window, and re-translate the
-same menu labels over and over. Veil is built around three ideas:
+same menu labels over and over. Lacyan Translator is built around three ideas:
 
 - **It finds the text for you.** The whole window is scanned on the GPU. Lines that belong together
   are merged into blocks, a block grows as more text appears, and text that's still "typing out"
@@ -26,17 +26,17 @@ same menu labels over and over. Veil is built around three ideas:
 
 1. Install [Ollama](https://ollama.com) and leave it running.
 2. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/).
-3. Download this repository and double-click **`Veil.bat`**.
+3. Download this repository and double-click **`LacyanTranslator.bat`**.
 
 The first launch sets up everything (a few minutes): Python packages, the right GPU runtime for your
 graphics card, and the translation model (Tencent Hunyuan-MT 1.5, 1.8B, about 1.9 GB). After that,
-`Veil.bat` starts in a couple of seconds.
+`LacyanTranslator.bat` starts in a couple of seconds.
 
 Run your game in **windowed** or **borderless** mode. Exclusive fullscreen can hide overlays.
 
 ## Using it
 
-Veil lives in the system tray (the green **译** icon).
+Lacyan Translator lives in the system tray (the green **译** icon).
 
 | Hotkey | Action |
 | --- | --- |
@@ -61,18 +61,18 @@ One `source = translation` pair per line. Add your own files in `config.json`.
 
 ## Settings
 
-`config.json` is created next to `Veil.bat` on first run. The most useful settings:
+`config.json` is created next to `LacyanTranslator.bat` on first run. The most useful settings:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `target_language` | `English` | Language to translate into |
-| `endpoint`, `model`, `api_key` | local Ollama, `veil-mt` | Any OpenAI-compatible server works: LM Studio, llama.cpp, or a cloud API |
+| `endpoint`, `model`, `api_key` | local Ollama, `lacyan-mt` | Any OpenAI-compatible server works: LM Studio, llama.cpp, or a cloud API |
 | `capture` | `foreground` | `foreground` = the active window, `monitor` = the whole screen |
 | `font_family` | `Segoe UI` | Font for translations |
 | `blur_strength`, `backdrop_tint` | `1.0`, `0.35` | How strongly the original is hidden |
 | `keep_original_color` | `true` | Reuse the game's text colour when it's readable |
 | `max_grow` | `1.8` | How much a block may grow to fit a longer translation |
-| `hide_from_capture` | `true` | Keep the overlay out of screenshots and recordings (this is also how Veil avoids reading its own output) |
+| `hide_from_capture` | `true` | Keep the overlay out of screenshots and recordings (this is also how Lacyan Translator avoids reading its own output) |
 
 ## How it works
 
@@ -83,7 +83,7 @@ screen capture ─▶ change detection ─▶ GPU OCR ─▶ block grouping ─�
 ```
 
 - **Capture**: `mss`, about 10 frames a second, of the active window. The overlay window is excluded
-  from capture (`WDA_EXCLUDEFROMCAPTURE`), so Veil always sees the real game underneath.
+  from capture (`WDA_EXCLUDEFROMCAPTURE`), so Lacyan Translator always sees the real game underneath.
 - **OCR**: PP-OCRv4 through RapidOCR on ONNX Runtime: CUDA on NVIDIA, DirectML on other GPUs, CPU as
   a last resort. Text boxes are detected on the full frame, but only boxes in the area that changed
   are read again; everything else reuses the previous reading.
@@ -108,11 +108,11 @@ first time, then 0 ms from memory.
 ```
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt "onnxruntime-gpu[cuda,cudnn]"
-.venv\Scripts\python -m veil                                # run the tray app
-.venv\Scripts\python -m veil --snapshot shot.png out.png    # translate a screenshot to a file
+.venv\Scripts\python -m lacyan_translator                                # run the tray app
+.venv\Scripts\python -m lacyan_translator --snapshot shot.png out.png    # translate a screenshot to a file
 ```
 
-Logs go to `data/veil.log`; the translation memory is `data/translations.sqlite`.
+Logs go to `data/lacyan.log`; the translation memory is `data/translations.sqlite`.
 
 ## License
 

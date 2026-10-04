@@ -1,7 +1,7 @@
 """Entry point.
 
-    python -m veil                       run the live translator (tray app)
-    python -m veil --snapshot in.png out.png
+    python -m lacyan_translator                       run the live translator (tray app)
+    python -m lacyan_translator --snapshot in.png out.png
                                          translate a screenshot and save the result (for testing/demos)
 """
 
@@ -69,7 +69,7 @@ def snapshot(src: str, dst: str) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="veil", description="Live on-screen translator")
+    ap = argparse.ArgumentParser(prog="lacyan_translator", description="Live on-screen translator")
     ap.add_argument("--snapshot", nargs=2, metavar=("IN", "OUT"), help="translate an image file and save the result")
     args = ap.parse_args()
     if args.snapshot:
