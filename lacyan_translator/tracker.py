@@ -46,6 +46,8 @@ class Track:
     cand_ref: Ref | None = None  # picture of the latest OCR'd text (becomes `ref` when its translation lands)
     bad: int = 0  # consecutive frames the text wasn't found
     hidden: bool = False
+    hidden_at: float = 0.0
+    moved_now: bool = False  # moved this frame (the overlay draws moving text slightly ahead)
 
     @property
     def visible(self) -> bool:

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QRadioButton, QVBoxLayout,
 )
 
-from . import __version__, model_setup
+from . import __version__, hardware, model_setup
 from .config import Config
 from .langs import TARGETS
 
@@ -117,6 +117,16 @@ class LaunchDialog(QDialog):
         group.addButton(self.cap_screen)
         (self.cap_screen if cfg.capture == "monitor" else self.cap_window).setChecked(True)
 
+        perf_label = QLabel("PERFORMANCE")
+        perf_label.setObjectName("field")
+        self.perf = QComboBox()
+        self.perf.addItems(list(hardware.PROFILES))
+        self.perf.setCurrentText(cfg.profile if cfg.profile in hardware.PROFILES else "Balanced")
+        self.perf_hint = QLabel(hardware.DESCRIPTIONS[self.perf.currentText()])
+        self.perf_hint.setObjectName("hint")
+        self.perf_hint.setWordWrap(True)
+        self.perf.currentTextChanged.connect(lambda n: self.perf_hint.setText(hardware.DESCRIPTIONS[n]))
+
         self.status = QLabel("Checking the translation model…")
         self.status.setObjectName("status")
         self.status.setWordWrap(True)
@@ -147,6 +157,9 @@ class LaunchDialog(QDialog):
         root.addWidget(cap_label)
         root.addWidget(self.cap_window)
         root.addWidget(self.cap_screen)
+        root.addWidget(perf_label)
+        root.addWidget(self.perf)
+        root.addWidget(self.perf_hint)
         root.addWidget(self.status)
         root.addWidget(hint)
         root.addWidget(self.again)
@@ -188,5 +201,87 @@ class LaunchDialog(QDialog):
         self.cfg.target_language = self.dst.currentText()
         self.cfg.capture = "monitor" if self.cap_screen.isChecked() else "foreground"
         self.cfg.show_launcher = self.again.isChecked()
+        hardware.apply_profile(self.cfg, self.perf.currentText())
+        self.cfg.save()
+        self.accept()
+
+
+class PerformanceDialog(QDialog):
+    """First launch: show the detected hardware, recommend a profile, and ask the user to confirm it."""
+
+    def __init__(self, cfg: Config, hw: "hardware.Hardware") -> None:
+        super().__init__()
+        self.cfg = cfg
+        self.setWindowTitle("Lacyan Translator · Performance setup")
+        self.setWindowIcon(QIcon(logo(64)))
+        self.setStyleSheet(STYLE)
+        pal = self.palette()
+        for role in (QPalette.ColorRole.Accent, QPalette.ColorRole.Highlight):
+            pal.setColor(role, QColor(43, 138, 112))
+        self.setPalette(pal)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setMinimumWidth(520)
+        rec = hw.recommended()
+
+        title = QLabel("Performance setup")
+        title.setObjectName("title")
+        found_label = QLabel("THIS PC")
+        found_label.setObjectName("field")
+        found = QLabel(hw.summary())
+        found.setWordWrap(True)
+        found.setStyleSheet("color:#eef2f0; font-size:13px;")
+
+        pick_label = QLabel("PROFILE")
+        pick_label.setObjectName("field")
+        self.group = QButtonGroup(self)
+        rows = QVBoxLayout()
+        rows.setSpacing(4)
+        for name in hardware.PROFILES:
+            rb = QRadioButton(f"{name}  (recommended for this PC)" if name == rec else name)
+            rb.setProperty("profile", name)
+            rb.setChecked(name == rec)
+            self.group.addButton(rb)
+            desc = QLabel(hardware.DESCRIPTIONS[name])
+            desc.setObjectName("hint")
+            desc.setWordWrap(True)
+            desc.setContentsMargins(26, 0, 0, 6)
+            rows.addWidget(rb)
+            rows.addWidget(desc)
+
+        warn = QLabel(
+            "Heads up: the translator shares your GPU with the game. If a game stutters, pick a lower profile, "
+            "or pause translation with Alt+P. You can change this any time in the launch window."
+        )
+        warn.setObjectName("status")
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color:#e3c26c;")
+
+        buttons = QHBoxLayout()
+        cancel = QPushButton("Quit")
+        cancel.setObjectName("quit")
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("Use this profile")
+        ok.setObjectName("start")
+        ok.setDefault(True)
+        ok.clicked.connect(self._accept)
+        buttons.addWidget(cancel)
+        buttons.addStretch()
+        buttons.addWidget(ok)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(26, 24, 26, 22)
+        root.setSpacing(12)
+        root.addWidget(title)
+        root.addWidget(found_label)
+        root.addWidget(found)
+        root.addWidget(pick_label)
+        root.addLayout(rows)
+        root.addWidget(warn)
+        root.addLayout(buttons)
+
+    def _accept(self) -> None:
+        chosen = self.group.checkedButton()
+        hardware.apply_profile(self.cfg, chosen.property("profile") if chosen else "Balanced")
+        self.cfg.profile_confirmed = True
         self.cfg.save()
         self.accept()

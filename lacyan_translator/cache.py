@@ -1,22 +1,26 @@
-"""Translation memory: every translated phrase is kept on disk so it shows instantly next time."""
+"""Translation memory: every translated phrase is kept on disk, so the same phrase shows instantly next time.
+
+Matching is exact on the whole phrase. Only spacing and full-width/half-width forms are normalized
+(so "满299减30" and "满 299 减 30" are the same phrase, but "满299减30" and "满298减30" are not).
+"""
 
 from __future__ import annotations
 
 import re
 import sqlite3
 import threading
+import unicodedata
 from collections import OrderedDict
-from difflib import SequenceMatcher
 
 _SPACE = re.compile(r"\s+")
 
 
 def normalize(text: str) -> str:
-    return _SPACE.sub("", text)
+    return _SPACE.sub("", unicodedata.normalize("NFKC", text))
 
 
 class TranslationCache:
-    def __init__(self, path: str, recent: int = 600) -> None:
+    def __init__(self, path: str, recent: int = 4000) -> None:
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS memory (src TEXT, lang TEXT, model TEXT, dst TEXT, hits INTEGER DEFAULT 0,"
@@ -26,25 +30,16 @@ class TranslationCache:
         self._recent: OrderedDict[tuple[str, str, str], str] = OrderedDict()
         self._recent_max = recent
 
-    def get(self, text: str, lang: str, model: str, fuzzy: float = 0.92) -> str | None:
+    def get(self, text: str, lang: str, model: str) -> str | None:
         key = (normalize(text), lang, model)
         with self._lock:
             if key in self._recent:
                 self._recent.move_to_end(key)
                 return self._recent[key]
-            row = self._db.execute(
-                "SELECT dst FROM memory WHERE src=? AND lang=? AND model=?", key
-            ).fetchone()
+            row = self._db.execute("SELECT dst FROM memory WHERE src=? AND lang=? AND model=?", key).fetchone()
             if row:
-                self._db.execute("UPDATE memory SET hits=hits+1 WHERE src=? AND lang=? AND model=?", key)
                 self._remember(key, row[0])
                 return row[0]
-            # OCR jitter: one misread character shouldn't cost a new translation
-            if len(key[0]) >= 6:
-                for (src, lg, md), dst in reversed(self._recent.items()):
-                    if lg == lang and md == model and abs(len(src) - len(key[0])) <= 2:
-                        if SequenceMatcher(None, src, key[0], autojunk=False).ratio() >= fuzzy:
-                            return dst
         return None
 
     def put(self, text: str, lang: str, model: str, translation: str) -> None:

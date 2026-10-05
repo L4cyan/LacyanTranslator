@@ -18,7 +18,8 @@ from .config import CONFIG_PATH, DATA_DIR, Config, data_path, open_in_explorer
 from .engine import Engine
 from .hotkeys import Hotkeys
 from .langs import TARGETS
-from .launcher import LaunchDialog, logo
+from . import hardware
+from .launcher import LaunchDialog, PerformanceDialog, logo
 from .overlay import Overlay
 
 log = logging.getLogger("lacyan")
@@ -61,7 +62,8 @@ class TranslatorApp:
         self.bridge.call.connect(lambda fn: fn())
         with mss.mss() as sct:
             mons = sct.monitors
-        self.monitor = mons[self.cfg.monitor] if 0 < self.cfg.monitor < len(mons) else mons[1]
+        self.monitor_index = self.cfg.monitor if 0 < self.cfg.monitor < len(mons) else 1
+        self.monitor = mons[self.monitor_index]
 
         self.overlay = Overlay(self.cfg, self.monitor)
         self.engine: Engine | None = None
@@ -96,8 +98,8 @@ class TranslatorApp:
         self.bridge.call.emit(self._start_engine)
 
     def _start_engine(self) -> None:
-        self.engine = Engine(self.cfg, self.monitor, {int(self.overlay.winId())})
-        self.engine.frame_ready.connect(self.overlay.on_frame)
+        self.engine = Engine(self.cfg, self.monitor, self.monitor_index, {int(self.overlay.winId())})
+        self.overlay.attach(self.engine)
         self.engine.status.connect(self._status)
         self.overlay.show()
         self.engine.start()
@@ -229,6 +231,10 @@ def run() -> int:
     app.setApplicationName("Lacyan Translator")
     app.setWindowIcon(QIcon(logo(64)))
     cfg = Config.load()
+    if not cfg.profile_confirmed:  # first launch: check the hardware and confirm a performance profile
+        if PerformanceDialog(cfg, hardware.detect()).exec() != QDialog.DialogCode.Accepted:
+            ctypes.windll.kernel32.CloseHandle(mutex)
+            return 0
     if cfg.show_launcher and LaunchDialog(cfg).exec() != QDialog.DialogCode.Accepted:
         ctypes.windll.kernel32.CloseHandle(mutex)
         return 0

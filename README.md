@@ -23,8 +23,11 @@ same menu labels over and over. Lacyan Translator is built around three ideas:
   their text is covered by a popup or replaced, and come back the moment it reappears.
 - **It's always readable.** Every translation gets a solid outline and soft shadow, keeping the game's
   own text colour when that colour stands out.
-- **It remembers.** Every translation is stored in a local translation memory, so repeated text
-  (menus, item names, common lines) appears instantly, even when the OCR misreads a character.
+- **It survives busy pages.** Built and tested against a dense shopping page (60+ text blocks per
+  screen): short phrases are translated in streamed batches top to bottom, and a new page clears the
+  old translations on the very first frame.
+- **It remembers.** Every translated phrase is stored in a local translation memory and shown instantly
+  the next time the exact same phrase appears. Shopping and game UI phrasebooks cover common words.
 
 ## Quick start
 
@@ -36,8 +39,17 @@ The first launch sets up everything (a few minutes): Python packages, the right 
 graphics card, and the translation model (Tencent Hunyuan-MT 1.5, 1.8B, about 1.9 GB). After that,
 `LacyanTranslator.bat` starts in a couple of seconds, and starts Ollama for you if it isn't running.
 
-Each launch opens a small window: pick the language to translate **to** (English by default), choose
-the active window or the whole screen, and press **Start translating**.
+On first launch it checks your hardware (GPU, graphics memory, CPU, RAM) and recommends a performance
+profile, which you confirm:
+
+| Profile | Follows text at | Translation | Best for |
+| --- | --- | --- | --- |
+| Low | 20 fps | 1 stream, small batches | Laptops without a dedicated GPU |
+| Balanced | 30 fps | 1 stream | Most gaming PCs |
+| High | 60 fps | 2 parallel streams | NVIDIA GPUs with 8 GB+ and 16 GB RAM |
+
+Each launch then opens a small window: pick the language to translate **to** (English by default), the
+active window or the whole screen, and the performance profile, then press **Start translating**.
 
 Run your game in **windowed** or **borderless** mode. Exclusive fullscreen can hide overlays.
 
@@ -90,8 +102,9 @@ screen capture ─▶ change detection ─▶ GPU OCR ─▶ block grouping ─�
                         click-through overlay ◀── blur + fitted text ◀──────────────────┘
 ```
 
-- **Capture**: `mss`, 30 frames a second while translations are shown (10 when idle), of the active
-  window. The overlay window is excluded from capture (`WDA_EXCLUDEFROMCAPTURE`), so Lacyan Translator
+- **Capture**: DXGI Desktop Duplication (`dxcam`, about 0.1 ms per frame, and only when the screen
+  actually changed), up to the profile's frame rate, of the active window. A still screen costs almost
+  nothing. The overlay window is excluded from capture (`WDA_EXCLUDEFROMCAPTURE`), so Lacyan Translator
   always sees the real game underneath.
 - **Following**: every frame, each shown translation checks that its text is still there with a small
   normalized-correlation match (about 3 ms for the whole frame). Moved text is found again nearby, with
@@ -101,14 +114,17 @@ screen capture ─▶ change detection ─▶ GPU OCR ─▶ block grouping ─�
   are read again; everything else reuses the previous reading.
 - **Grouping and tracking**: OCR lines are merged into paragraphs, matched across frames so the
   overlay doesn't flicker, and translated only once their text has been stable for two passes.
-- **Translation**: Hunyuan-MT 1.5 (1.8B) through Ollama, using the model's own prompt format and
-  glossary syntax, with a retry when a line comes back untranslated.
+- **Translation**: Hunyuan-MT 1.5 (1.8B) through Ollama. Short phrases go in numbered, streamed
+  batches (each translation appears as soon as its line arrives); long ones go alone. Exact phrasebook
+  and memory hits never reach the model. Lines that come back untranslated are retried.
 - **Rendering**: a click-through, always-on-top Qt window that repaints only the areas that changed.
   All backdrops are drawn first and then all text, so one block's blur can never cover another
   block's translation.
 
-On an RTX 4070 laptop: scrolling translations stay within 2 px of their text; covered text hides on
-the same frame; a new line of dialogue appears in about 0.8 s the first time and instantly after that.
+Measured on an RTX 4070 laptop with a dense shopping page at 2560×1600: translations stay on their text
+while scrolling at 2,400 px/s (0 px error), a cold screen of 44 blocks fills in about 7 s (first lines
+after 2 s), a new page clears the old translations on the first frame, and per-frame work is about 9 ms
+while scrolling and 0.3 ms on a still screen.
 
 ## Limits
 

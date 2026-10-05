@@ -32,11 +32,14 @@ def _belongs_together(a: Line, b: Line) -> bool:
     # Same visual line, split by OCR (e.g. "师姐：" + "道友留步")
     if v_overlap > 0.5 * h and h_gap < 1.2 * h:
         return True
-    # Stacked lines of one paragraph
+    # Stacked lines of one paragraph: same font size, close together, aligned. (Different sizes stacked
+    # closely are usually separate UI labels: a product title over its sales count, a name over a price.)
+    if max(a.h, b.h) > 1.2 * h:
+        return False
     v_gap = max(a.y0, b.y0) - min(a.y1, b.y1)
     h_overlap = min(a.x1, b.x1) - max(a.x0, b.x0)
-    left_aligned = abs(a.x0 - b.x0) < 1.5 * h
-    return v_gap < 0.9 * h and (h_overlap > 0.3 * min(a.w, b.w) or left_aligned)
+    left_aligned = abs(a.x0 - b.x0) < 0.8 * h
+    return v_gap < 0.75 * h and (h_overlap > 0.5 * min(a.w, b.w) or left_aligned)
 
 
 def group(lines: list[Line]) -> list[Block]:

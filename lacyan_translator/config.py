@@ -25,14 +25,15 @@ class Config:
     prompt_style: str = "auto"  # auto | hymt | chat
     glossary_files: list[str] = field(default_factory=lambda: ["glossaries/xianxia.txt"])
     # Exact-match phrasebooks: a block that is exactly one of these is replaced without asking the model.
-    phrasebook_files: list[str] = field(default_factory=lambda: ["glossaries/ui.txt"])
-    translation_workers: int = 2
+    phrasebook_files: list[str] = field(default_factory=lambda: ["glossaries/ui.txt", "glossaries/shopping.txt"])
+    translation_workers: int = 1  # parallel translation streams (set by the performance profile)
+    batch_size: int = 8  # short phrases translated per model call
 
     # Capture & OCR
     capture: str = "foreground"  # foreground | monitor
     monitor: int = 1  # 1 = primary (mss numbering)
     min_confidence: float = 0.6
-    ocr_interval_ms: int = 250
+    ocr_interval_ms: int = 350
     frame_interval_ms: int = 100
     change_threshold: float = 1.2
     stable_passes: int = 2  # identical OCR passes before translating (handles typewriter text)
@@ -45,6 +46,11 @@ class Config:
     max_grow: float = 1.8  # how much a block may grow to fit longer translated text
     keep_original_color: bool = True
     hide_from_capture: bool = True  # keep overlay out of screenshots (also stops Lacyan Translator reading itself)
+
+    # Performance (chosen at first launch from the detected hardware; see hardware.py)
+    profile: str = "Balanced"
+    profile_confirmed: bool = False
+    max_fps: int = 30
 
     # Startup
     show_launcher: bool = True  # the window with language choice + Start button

@@ -51,6 +51,11 @@ class Overlay(QWidget):
         self._offset = (0, 0)
         self._painted: list[QRect] = []  # logical rects drawn last time, cleared on the next update
         self._sig = None
+        self.engine = None
+
+    def attach(self, engine) -> None:
+        self.engine = engine
+        engine.frame_ready.connect(self.on_frame)
 
     def showEvent(self, e) -> None:  # noqa: N802
         super().showEvent(e)
@@ -59,9 +64,20 @@ class Overlay(QWidget):
         log.info("Overlay on %s (%dx%d @ %.2fx), hidden from capture: %s",
                  self.screen_.name(), g.width(), g.height(), self.screen_.devicePixelRatio(), self.capture_hidden)
 
-    def on_frame(self, frame: Frame) -> None:
-        """Plan this frame; repaint only the areas that changed (nothing at all if nothing did)."""
-        plans = render.plan_all(frame.image, frame.items, self.font_, self.cfg, self._cache, frame.obstacles, time.time())
+    def on_frame(self) -> None:
+        """Draw the newest frame (older ones are skipped, so the overlay can never fall behind).
+        Only the areas that changed are repainted; nothing at all if nothing did."""
+        frame: Frame | None = self.engine.take_latest() if self.engine else None
+        if frame is None:
+            return
+        now = time.time()
+        plans = render.plan_all(frame.image, frame.items, self.font_, self.cfg, self._cache, frame.obstacles, now)
+        vx, vy = frame.vel
+        if vx or vy:
+            # Text that's scrolling is drawn where it is *now*, not where it was when captured.
+            lag = min(0.1, now - frame.t + 0.012)
+            dx, dy = int(round(vx * lag)), int(round(vy * lag))
+            plans = [p.shifted(dx, dy) if p.item.moving else p for p in plans]
         sig = (frame.off_x, frame.off_y, tuple(
             (p.item.id, p.rect, p.item.text, round(p.item.opacity, 2), p.img.cacheKey()) for p in plans))
         if sig == self._sig:

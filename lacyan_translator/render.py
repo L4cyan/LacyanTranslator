@@ -23,6 +23,7 @@ class Item:
     text: str
     color: tuple[int, int, int] | None
     opacity: float
+    moving: bool = False
 
 
 @dataclass
@@ -115,7 +116,10 @@ def fit(item: Item, font: QFont, bounds: tuple[int, int], max_grow: float,
                 if not _hits(r, others, bounds):
                     return Layout(r, px, left)
         px -= 1
-    return Layout(item.rect, smallest, left)
+    # Nothing fits without covering other text: keep the smallest size and grow the box to the text,
+    # so text never spills outside the area that gets repainted (that left "residue" behind).
+    tw, th = measure(smallest, w)
+    return Layout((x0, y0, max(x1, x0 + int(tw) + 2), max(y1, y0 + int(th) + 2)), smallest, left)
 
 
 def _side_pads(rect: tuple[int, int, int, int], pad: int, others) -> tuple[int, int, int, int]:
@@ -219,32 +223,79 @@ class Plan:
 
     item: Item
     rect: tuple[int, int, int, int]
-    px: float
-    img: QImage
+    img: QImage  # blurred backdrop
     bx: int
     by: int
-    bg: tuple[float, float, float]
-    path: QPainterPath
+    text: QImage  # pre-rendered text (shadow + outline + fill)
+    tx: int
+    ty: int
     bounds: tuple[int, int, int, int]
+
+    def shifted(self, dx: int, dy: int) -> "Plan":
+        if not dx and not dy:
+            return self
+        b = self.bounds
+        return Plan(self.item, (self.rect[0] + dx, self.rect[1] + dy, self.rect[2] + dx, self.rect[3] + dy), self.img,
+                    self.bx + dx, self.by + dy, self.text, self.tx + dx, self.ty + dy, (b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy))
 
 
 class RenderCache:
-    """Layouts and text paths are kept per block (relative to it), so a scrolling block just moves.
-    Backdrops are reused while the block moves and re-blurred a few times a second."""
+    """Per-block layouts, text images and backdrops, kept relative to the block so a scrolling block
+    just moves. Backdrops are re-blurred a few times a second, spread across frames."""
 
-    BACKDROP_TTL = 0.3
+    BACKDROP_TTL = 0.35
+    REFRESH_PER_FRAME = 12
 
     def __init__(self) -> None:
         self.layouts: dict = {}
-        self.paths: dict = {}
+        self.texts: dict = {}
         self.backdrops: dict = {}
 
     def prune(self, live_ids: set[int]) -> None:
-        for d in (self.layouts, self.paths):
+        for d in (self.layouts, self.texts):
             for k in [k for k in d if k[0] not in live_ids]:
                 del d[k]
         for k in [k for k in self.backdrops if k not in live_ids]:
             del self.backdrops[k]
+
+
+def _stroke_width(px: float) -> float:
+    return max(2.0, px * 0.16)
+
+
+def render_text(text: str, font: QFont, px: float, w: int, h: int, align, fill: QColor, outline: QColor) -> tuple[QImage, int]:
+    """Text with a soft shadow, a crisp outline and the fill, drawn once into an image. Returns (image, margin)."""
+    f = QFont(font)
+    f.setPixelSize(int(px))
+    path = text_path(text, f, w, h, align)
+    sw = _stroke_width(px)
+    br = path.boundingRect()
+    m = int(sw * 2 + 3)
+    width = int(max(w, br.right()) + 2 * m) + 1
+    height = int(max(h, br.bottom()) + 2 * m) + 1
+    img = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(Qt.GlobalColor.transparent)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.translate(m, m)
+    shadow = QColor(outline)
+    shadow.setAlpha(90)
+    p.save()
+    p.translate(sw * 0.6, sw * 0.8)
+    p.setPen(QPen(shadow, sw * 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    p.setBrush(shadow)
+    p.drawPath(path)
+    p.restore()
+    ol = QColor(outline)
+    ol.setAlpha(235)
+    p.setPen(QPen(ol, sw, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawPath(path)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(fill)
+    p.drawPath(path)
+    p.end()
+    return img, m
 
 
 def plan_all(frame: np.ndarray, items: list[Item], font: QFont, cfg, cache: RenderCache,
@@ -265,38 +316,44 @@ def plan_all(frame: np.ndarray, items: list[Item], font: QFont, cfg, cache: Rend
         placed.append(r)
         laid.append((item, r, rel[4], rel[5]))
 
+    # Re-blur the stalest backdrops first, a limited number per frame, so a busy page never stalls a frame.
+    stale = sorted(
+        (i for i, (item, r, _, _) in enumerate(laid)
+         if (bd := cache.backdrops.get(item.id)) is None or bd[0] != (r[2] - r[0], r[3] - r[1], item.line_h)
+         or now - bd[1] >= RenderCache.BACKDROP_TTL),
+        key=lambda i: cache.backdrops.get(laid[i][0].id, (None, 0.0))[1],
+    )
+    must = {i for i in stale if laid[i][0].id not in cache.backdrops
+            or cache.backdrops[laid[i][0].id][0] != (laid[i][1][2] - laid[i][1][0], laid[i][1][3] - laid[i][1][1], laid[i][0].line_h)}
+    refresh = must | set(stale[: RenderCache.REFRESH_PER_FRAME])
+
     plans = []
     for i, (item, r, px, align) in enumerate(laid):
         size_key = (r[2] - r[0], r[3] - r[1], item.line_h)
-        bd = cache.backdrops.get(item.id)
-        if bd and bd[0] == size_key and now - bd[1] < RenderCache.BACKDROP_TTL:
-            _, _, img, rx, ry, bg = bd
-        else:
+        if i in refresh:
             others = [o for o in obstacles if not _inside(o, r)] + [p[1] for j, p in enumerate(laid) if j != i]
             made = backdrop(frame, r, item.line_h, cfg.blur_strength, cfg.backdrop_tint, others)
             if made is None:
                 continue
             img, bx, by, bg = made
-            rx, ry = bx - r[0], by - r[1]
-            cache.backdrops[item.id] = (size_key, now, img, rx, ry, bg)
+            cache.backdrops[item.id] = (size_key, now, img, bx - r[0], by - r[1], bg)
+        bd = cache.backdrops.get(item.id)
+        if bd is None:
+            continue
+        _, _, img, rx, ry, bg = bd
 
-        pkey = (item.id, item.text, r[2] - r[0], r[3] - r[1], px, int(align))
-        path = cache.paths.get(pkey)
-        if path is None:
-            f = QFont(font)
-            f.setPixelSize(int(px))
-            path = cache.paths[pkey] = text_path(item.text, f, r[2] - r[0], r[3] - r[1], align)
+        fill, outline = pick_colors(item.color if cfg.keep_original_color else None, bg)
+        tkey = (item.id, item.text, r[2] - r[0], r[3] - r[1], px, int(align), fill.rgb(), outline.rgb())
+        txt = cache.texts.get(tkey)
+        if txt is None:
+            txt = cache.texts[tkey] = render_text(item.text, font, px, r[2] - r[0], r[3] - r[1], align, fill, outline)
+        timg, m = txt
         bx, by = r[0] + rx, r[1] + ry
-        stroke = int(_stroke_width(px) * 2 + 4)
-        bounds = (min(bx, r[0] - stroke), min(by, r[1] - stroke),
-                  max(bx + img.width(), r[2] + stroke), max(by + img.height(), r[3] + stroke))
-        plans.append(Plan(item, r, px, img, bx, by, bg, path, bounds))
+        tx, ty = r[0] - m, r[1] - m
+        bounds = (min(bx, tx), min(by, ty), max(bx + img.width(), tx + timg.width()), max(by + img.height(), ty + timg.height()))
+        plans.append(Plan(item, r, img, bx, by, timg, tx, ty, bounds))
     cache.prune({it.id for it in items})
     return plans
-
-
-def _stroke_width(px: float) -> float:
-    return max(2.0, px * 0.16)
 
 
 def paint_all(painter: QPainter, plans: list[Plan], cfg) -> None:
@@ -304,31 +361,9 @@ def paint_all(painter: QPainter, plans: list[Plan], cfg) -> None:
     for p in plans:
         painter.setOpacity(p.item.opacity)
         painter.drawImage(p.bx, p.by, p.img)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     for p in plans:
-        fill, outline = pick_colors(p.item.color if cfg.keep_original_color else None, p.bg)
-        w = _stroke_width(p.px)
-        painter.save()
         painter.setOpacity(p.item.opacity)
-        painter.translate(p.rect[0], p.rect[1])
-        # soft drop shadow
-        shadow = QColor(outline)
-        shadow.setAlpha(90)
-        painter.save()
-        painter.translate(w * 0.6, w * 0.8)
-        painter.setPen(QPen(shadow, w * 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        painter.setBrush(shadow)
-        painter.drawPath(p.path)
-        painter.restore()
-        # crisp outline, then the fill on top
-        outline.setAlpha(235)
-        painter.setPen(QPen(outline, w, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(p.path)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(fill)
-        painter.drawPath(p.path)
-        painter.restore()
+        painter.drawImage(p.tx, p.ty, p.text)
     painter.setOpacity(1.0)
 
 

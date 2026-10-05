@@ -54,7 +54,9 @@ def start_ollama(wait_s: float = 20.0) -> bool:
     exe = ollama_exe()
     if not exe:
         return False
-    subprocess.Popen([exe, "serve"], creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    env = dict(os.environ)
+    env.setdefault("OLLAMA_NUM_PARALLEL", "2")  # lets the High profile's two translation streams run together
+    subprocess.Popen([exe, "serve"], creationflags=0x08000000, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.time() + wait_s
     while time.time() < deadline:
         if ollama_models() is not None:

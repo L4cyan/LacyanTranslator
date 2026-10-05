@@ -51,7 +51,7 @@ def make_ref(pyr: Pyramid, rect: tuple[int, int, int, int]) -> Ref | None:
     lv = _level_for(y1 - y0)
     g = pyr.levels[lv]
     a = g[max(0, y0 // lv):y1 // lv, max(0, x0 // lv):x1 // lv]
-    if a.shape[0] < 4 or a.shape[1] < 6 or float(a.std()) < 6.0:
+    if a.shape[0] < 4 or a.shape[1] < 6 or float(a.std()) < 3.0:
         return None  # too small or too flat to track reliably
     return Ref(a.copy(), lv)
 
@@ -86,19 +86,31 @@ def search(pyr: Pyramid, ref: Ref, x: float, y: float, mx: int, my: int) -> tupl
     return float(best), (wx0 + loc[0]) * lv, (wy0 + loc[1]) * lv
 
 
-def locate(pyr: Pyramid, ref: Ref, x: int, y: int, h: int, guess: tuple[float, float]) -> tuple[float, int, int]:
+def thresholds(ref: Ref) -> tuple[float, float, float]:
+    """(stay, move, gone) correlation thresholds. Small references (a couple of characters) are easy to
+    confuse with other text nearby, so they must match more strictly."""
+    area = ref.img.shape[0] * ref.img.shape[1]
+    if area < 600:
+        return 0.90, 0.88, 0.40
+    if area < 2000:
+        return 0.86, 0.80, 0.38
+    return STAY, MOVE, GONE
+
+
+def locate(pyr: Pyramid, ref: Ref, x: int, y: int, h: int, guess: tuple[float, float],
+           stay: float = STAY, move: float = MOVE) -> tuple[float, int, int]:
     """Where is this text now? Checks in place, then at the predicted position, then searches around it."""
     s = score_at(pyr, ref, x, y)
-    if s >= STAY:
+    if s >= stay:
         return s, x, y
     gx, gy = x + guess[0], y + guess[1]
     if guess != (0, 0):
         s2 = score_at(pyr, ref, gx, gy)
-        if s2 >= STAY:
+        if s2 >= stay:
             return s2, int(round(gx)), int(round(gy))
     my = max(4 * h, 160) + int(abs(guess[1]))
     mx = max(2 * h, 64) + int(abs(guess[0]))
     s3, nx, ny = search(pyr, ref, gx, gy, mx, my)
-    if s3 >= MOVE:
+    if s3 >= move:
         return s3, nx, ny
     return max(s, s3), x, y
