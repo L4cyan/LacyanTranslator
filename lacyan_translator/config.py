@@ -43,7 +43,7 @@ class Config:
     font_family: str = "Segoe UI"
     blur_strength: float = 1.0
     backdrop_tint: float = 0.35
-    max_grow: float = 1.8  # how much a block may grow to fit longer translated text
+    max_grow: float = 1.0  # 1.0 = translations stay exactly inside the original text's area (font shrinks to fit)
     keep_original_color: bool = True
     hide_from_capture: bool = True  # keep overlay out of screenshots (also stops Lacyan Translator reading itself)
 

@@ -51,7 +51,7 @@ def snapshot(src: str, dst: str) -> int:
             cache.put(b.text, cfg.target_language, cfg.model, out)
             src_tag = "model"
         print(f"[{(time.perf_counter() - t) * 1000:5.0f} ms {src_tag:6}] {b.text}  ->  {out}")
-        items.append(render.Item(i, b.rect, b.line_h, b.n_lines, out, render.estimate_text_color(frame, b.rect), 1.0))
+        items.append(render.Item(i, b.rect, b.line_h, b.n_lines, out, render.estimate_text_color(frame, b.rect), 1.0, False, b.vertical))
     print(f"OCR {ocr_ms:.0f} ms on {ocr.device}, {len(lines)} lines -> {len(blocks)} blocks")
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -64,7 +64,6 @@ def snapshot(src: str, dst: str) -> int:
     render.paint_all(p, plans, cfg)
     p.end()
     img.save(dst)
-    tr.shutdown()
     return 0
 
 

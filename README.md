@@ -21,6 +21,10 @@ same menu labels over and over. Lacyan Translator is built around three ideas:
   covering other text on screen.
 - **It moves with the screen.** Translations follow scrolling text frame by frame, vanish the instant
   their text is covered by a popup or replaced, and come back the moment it reappears.
+- **It only covers the original text.** Each translation stays inside the area of the Chinese it
+  replaces; the font shrinks to fit. Vertical text gets one word per line, top to bottom.
+- **It waits for dialogue to finish.** Text that's still typing out is only translated once it has
+  stopped changing, so you never get half a sentence.
 - **It's always readable.** Every translation gets a solid outline and soft shadow, keeping the game's
   own text colour when that colour stands out.
 - **It survives busy pages.** Built and tested against a dense shopping page (60+ text blocks per
@@ -91,7 +95,7 @@ One `source = translation` pair per line. Add your own files in `config.json`.
 | `font_family` | `Segoe UI` | Font for translations |
 | `blur_strength`, `backdrop_tint` | `1.0`, `0.35` | How strongly the original is hidden |
 | `keep_original_color` | `true` | Reuse the game's text colour when it's readable |
-| `max_grow` | `1.8` | How much a block may grow to fit a longer translation |
+| `max_grow` | `1.0` | `1.0` keeps every translation inside the original text's area (the font shrinks to fit); higher lets boxes grow into free space |
 | `hide_from_capture` | `true` | Keep the overlay out of screenshots and recordings (this is also how Lacyan Translator avoids reading its own output) |
 
 ## How it works

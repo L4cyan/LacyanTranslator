@@ -11,6 +11,8 @@ from .layout import Block
 from .motion import Ref
 
 _ids = itertools.count(1)
+SETTLE_S = 0.5  # text must be unchanged this long before it's translated
+SETTLE_GROWING_S = 0.9  # ...and this long if it was still typing out (each read was the last one plus more)
 
 
 def similar(a: str, b: str) -> float:
@@ -47,7 +49,13 @@ class Track:
     bad: int = 0  # consecutive frames the text wasn't found
     hidden: bool = False
     hidden_at: float = 0.0
-    moved_now: bool = False  # moved this frame (the overlay draws moving text slightly ahead)
+    moved_now: bool = False
+    changed_at: float = field(default_factory=time.time)  # when the OCR'd text last changed
+    growing: bool = False  # last change only appended text (dialogue typing out)
+
+    def settling(self, now: float) -> bool:
+        """Still typing out / just changed: don't translate (or show remembered text) yet."""
+        return now - self.changed_at < (SETTLE_GROWING_S if self.growing else SETTLE_S)  # moved this frame (the overlay draws moving text slightly ahead)
 
     @property
     def visible(self) -> bool:
@@ -69,6 +77,7 @@ class Tracker:
 
         Returns tracks whose text just became stable and needs a translation.
         """
+        now = time.time()
         unmatched = list(self.tracks)
         ready: list[Track] = []
         for b, ref in zip(blocks, refs):
@@ -87,11 +96,17 @@ class Tracker:
                 unmatched.remove(best)
             t = best
             t.misses = 0
-            t.stable_count = t.stable_count + 1 if similar(b.text, t.block.text) >= 0.97 else 1
+            if similar(b.text, t.block.text) >= 0.97:
+                t.stable_count += 1
+            else:
+                old = t.block.text
+                t.growing = len(b.text) > len(old) and b.text.startswith(old[: max(1, len(old) - 1)])
+                t.changed_at = now
+                t.stable_count = 1
             t.block = b
             if ref is not None:
                 t.cand_ref = ref
-            if t.stable_count >= self.stable_passes and t.stable_text != b.text:
+            if t.stable_count >= self.stable_passes and not t.settling(now) and t.stable_text != b.text:
                 t.stable_text = b.text
                 ready.append(t)
         for t in unmatched:

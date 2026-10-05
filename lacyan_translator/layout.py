@@ -17,6 +17,7 @@ class Block:
     text: str
     line_h: int
     n_lines: int
+    vertical: bool = False
 
     @property
     def rect(self) -> tuple[int, int, int, int]:
@@ -24,6 +25,8 @@ class Block:
 
 
 def _belongs_together(a: Line, b: Line) -> bool:
+    if a.vertical or b.vertical:  # vertical columns stay on their own
+        return False
     h = min(a.h, b.h)
     if max(a.h, b.h) > 1.7 * h:  # very different font sizes: title vs body
         return False
@@ -80,8 +83,10 @@ def group(lines: list[Line]) -> list[Block]:
                 max(l.x1 for l in members),
                 max(l.y1 for l in members),
                 text,
-                int(sorted(l.h for l in members)[len(members) // 2]),
+                # for a vertical column the character size is the column's width
+                members[0].w if members[0].vertical else int(sorted(l.h for l in members)[len(members) // 2]),
                 len(rows),
+                len(members) == 1 and members[0].vertical,
             )
         )
     return blocks

@@ -31,6 +31,11 @@ class Line:
     def rect(self) -> tuple[int, int, int, int]:
         return self.x0, self.y0, self.x1, self.y1
 
+    @property
+    def vertical(self) -> bool:
+        """A column of text read top to bottom (tall, narrow box with several characters)."""
+        return self.h > 1.5 * self.w and len(self.text) >= 2
+
 
 class OCR:
     """Picks CUDA (NVIDIA) → DirectML (any GPU) → CPU."""

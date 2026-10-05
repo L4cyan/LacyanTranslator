@@ -24,6 +24,7 @@ class Item:
     color: tuple[int, int, int] | None
     opacity: float
     moving: bool = False
+    vertical: bool = False
 
 
 @dataclass
@@ -31,6 +32,8 @@ class Layout:
     rect: tuple[int, int, int, int]
     px: float
     align: Qt.AlignmentFlag
+    vertical: bool = False  # one word per line, top to bottom
+    elide: bool = False  # cut with an ellipsis if it still doesn't fit at the smallest size
 
 
 def _luma(rgb: tuple[float, float, float]) -> float:
@@ -73,9 +76,14 @@ def _hits(r: tuple[int, int, int, int], others: list[tuple[int, int, int, int]],
 
 def fit(item: Item, font: QFont, bounds: tuple[int, int], max_grow: float,
         obstacles: list[tuple[int, int, int, int]] = ()) -> Layout:
-    """Pick the largest readable font, growing the box if needed, without covering any other text on screen."""
+    """Pick the largest font that fits. By default (max_grow 1.0) the translation stays inside the original
+    text's area and only the font size changes; with max_grow > 1 the box may grow into free space."""
     x0, y0, x1, y1 = item.rect
     w, h = x1 - x0, y1 - y0
+    if item.vertical:
+        return _fit_vertical(item, font)
+    if max_grow <= 1.0:
+        return _fit_inside(item, font)
     base = max(12.0, item.line_h * 0.86)
     smallest = max(11.0, item.line_h * 0.55)
     left = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -120,6 +128,53 @@ def fit(item: Item, font: QFont, bounds: tuple[int, int], max_grow: float,
     # so text never spills outside the area that gets repainted (that left "residue" behind).
     tw, th = measure(smallest, w)
     return Layout((x0, y0, max(x1, x0 + int(tw) + 2), max(y1, y0 + int(th) + 2)), smallest, left)
+
+
+def _measure(font: QFont, px: float, width: float, text: str) -> tuple[float, float]:
+    f = QFont(font)
+    f.setPixelSize(max(1, int(px)))
+    r = QFontMetricsF(f).boundingRect(QRectF(0, 0, width, 1e5), TEXT_FLAGS, text)
+    return r.width(), r.height()
+
+
+def _fits(font: QFont, px: float, w: float, h: float, text: str) -> bool:
+    tw, th = _measure(font, px, w, text)
+    return tw <= w + 1 and th <= h * 1.08
+
+
+def _fit_inside(item: Item, font: QFont) -> Layout:
+    """Shrink the font until the translation fits exactly where the original text was."""
+    w, h = item.rect[2] - item.rect[0], item.rect[3] - item.rect[1]
+    single = item.n_lines == 1
+    align = Qt.AlignmentFlag.AlignCenter if single else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    smallest = max(8.0, item.line_h * 0.3)
+    lo, hi = smallest, max(smallest, item.line_h * 0.9)
+    if _fits(font, hi, w, h, item.text):
+        return Layout(item.rect, hi, align)
+    if not _fits(font, lo, w, h, item.text):
+        return Layout(item.rect, lo, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elide=True)
+    for _ in range(7):  # binary search the largest size that fits
+        mid = (lo + hi) / 2
+        if _fits(font, mid, w, h, item.text):
+            lo = mid
+        else:
+            hi = mid
+    return Layout(item.rect, lo, align)
+
+
+def _fit_vertical(item: Item, font: QFont) -> Layout:
+    """Vertical column: one word per line going down, sized to the column."""
+    w, h = item.rect[2] - item.rect[0], item.rect[3] - item.rect[1]
+    words = item.text.split() or [item.text]
+    px = max(8.0, w * 0.9)
+    while px > 8:
+        f = QFont(font)
+        f.setPixelSize(int(px))
+        fm = QFontMetricsF(f)
+        if max(fm.horizontalAdvance(wd) for wd in words) <= w and fm.height() * len(words) <= h:
+            break
+        px -= 0.5
+    return Layout(item.rect, px, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, vertical=True)
 
 
 def _side_pads(rect: tuple[int, int, int, int], pad: int, others) -> tuple[int, int, int, int]:
@@ -189,8 +244,20 @@ def pick_colors(original: tuple[int, int, int] | None, bg: tuple[float, float, f
     return QColor(*fg), QColor(*outline)
 
 
-def text_path(text: str, font: QFont, width: float, height: float, align: Qt.AlignmentFlag) -> QPainterPath:
-    """Word-wrapped text as a vector path (so it can be outlined), vertically centred in width×height."""
+def text_path(text: str, font: QFont, width: float, height: float, align: Qt.AlignmentFlag,
+              vertical: bool = False, elide: bool = False) -> QPainterPath:
+    """Word-wrapped text as a vector path (so it can be outlined), vertically centred in width x height.
+    `vertical` stacks one word per line, top to bottom; `elide` ends with an ellipsis if it runs out of room."""
+    fm = QFontMetricsF(font)
+    path = QPainterPath()
+    if vertical:
+        words = text.split() or [text]
+        step = fm.height()
+        top = max(0.0, (height - step * len(words)) / 2)
+        for i, wd in enumerate(words):
+            wd = fm.elidedText(wd, Qt.TextElideMode.ElideRight, width)
+            path.addText((width - fm.horizontalAdvance(wd)) / 2, top + i * step + fm.ascent(), font, wd)
+        return path
     opt = QTextOption()
     opt.setWrapMode(QTextOption.WrapMode.WordWrap)
     layout = QTextLayout(text, font)
@@ -206,12 +273,20 @@ def text_path(text: str, font: QFont, width: float, height: float, align: Qt.Ali
         y += line.height()
         lines.append(line)
     layout.endLayout()
-    fm = QFontMetricsF(font)
+    tail = None
+    if elide:  # keep only the lines that fit; the last kept one ends with an ellipsis
+        kept = [ln for ln in lines if ln.y() + ln.height() <= height + 1] or lines[:1]
+        if len(kept) < len(lines):
+            last = kept[-1]
+            tail = fm.elidedText(text[last.textStart():], Qt.TextElideMode.ElideRight, width)
+            lines = kept
+            y = last.y() + last.height()
     top = max(0.0, (height - y) / 2)
-    path = QPainterPath()
     centred = bool(align & Qt.AlignmentFlag.AlignHCenter)
-    for line in lines:
+    for i, line in enumerate(lines):
         seg = text[line.textStart(): line.textStart() + line.textLength()].rstrip()
+        if tail is not None and i == len(lines) - 1:
+            seg = tail
         x = (width - fm.horizontalAdvance(seg)) / 2 if centred else 0.0
         path.addText(x, top + line.y() + line.ascent(), font, seg)
     return path
@@ -263,11 +338,12 @@ def _stroke_width(px: float) -> float:
     return max(2.0, px * 0.16)
 
 
-def render_text(text: str, font: QFont, px: float, w: int, h: int, align, fill: QColor, outline: QColor) -> tuple[QImage, int]:
+def render_text(text: str, font: QFont, px: float, w: int, h: int, align, fill: QColor, outline: QColor,
+                vertical: bool = False, elide: bool = False) -> tuple[QImage, int]:
     """Text with a soft shadow, a crisp outline and the fill, drawn once into an image. Returns (image, margin)."""
     f = QFont(font)
     f.setPixelSize(int(px))
-    path = text_path(text, f, w, h, align)
+    path = text_path(text, f, w, h, align, vertical, elide)
     sw = _stroke_width(px)
     br = path.boundingRect()
     m = int(sw * 2 + 3)
@@ -310,15 +386,16 @@ def plan_all(frame: np.ndarray, items: list[Item], font: QFont, cfg, cache: Rend
         if rel is None:
             # avoid other text on screen and the space earlier blocks already took
             lay = fit(item, font, (W, H), cfg.max_grow, list(obstacles) + placed)
-            rel = (lay.rect[0] - x0, lay.rect[1] - y0, lay.rect[2] - x0, lay.rect[3] - y0, lay.px, lay.align)
+            rel = (lay.rect[0] - x0, lay.rect[1] - y0, lay.rect[2] - x0, lay.rect[3] - y0, lay.px, lay.align,
+                   lay.vertical, lay.elide)
             cache.layouts[key] = rel
         r = (x0 + rel[0], y0 + rel[1], x0 + rel[2], y0 + rel[3])
         placed.append(r)
-        laid.append((item, r, rel[4], rel[5]))
+        laid.append((item, r, rel[4], rel[5], rel[6], rel[7]))
 
     # Re-blur the stalest backdrops first, a limited number per frame, so a busy page never stalls a frame.
     stale = sorted(
-        (i for i, (item, r, _, _) in enumerate(laid)
+        (i for i, (item, r, *_) in enumerate(laid)
          if (bd := cache.backdrops.get(item.id)) is None or bd[0] != (r[2] - r[0], r[3] - r[1], item.line_h)
          or now - bd[1] >= RenderCache.BACKDROP_TTL),
         key=lambda i: cache.backdrops.get(laid[i][0].id, (None, 0.0))[1],
@@ -328,7 +405,7 @@ def plan_all(frame: np.ndarray, items: list[Item], font: QFont, cfg, cache: Rend
     refresh = must | set(stale[: RenderCache.REFRESH_PER_FRAME])
 
     plans = []
-    for i, (item, r, px, align) in enumerate(laid):
+    for i, (item, r, px, align, vertical, elide) in enumerate(laid):
         size_key = (r[2] - r[0], r[3] - r[1], item.line_h)
         if i in refresh:
             others = [o for o in obstacles if not _inside(o, r)] + [p[1] for j, p in enumerate(laid) if j != i]
@@ -343,10 +420,11 @@ def plan_all(frame: np.ndarray, items: list[Item], font: QFont, cfg, cache: Rend
         _, _, img, rx, ry, bg = bd
 
         fill, outline = pick_colors(item.color if cfg.keep_original_color else None, bg)
-        tkey = (item.id, item.text, r[2] - r[0], r[3] - r[1], px, int(align), fill.rgb(), outline.rgb())
+        tkey = (item.id, item.text, r[2] - r[0], r[3] - r[1], px, int(align), vertical, elide, fill.rgb(), outline.rgb())
         txt = cache.texts.get(tkey)
         if txt is None:
-            txt = cache.texts[tkey] = render_text(item.text, font, px, r[2] - r[0], r[3] - r[1], align, fill, outline)
+            txt = cache.texts[tkey] = render_text(item.text, font, px, r[2] - r[0], r[3] - r[1], align, fill, outline,
+                                                  vertical, elide)
         timg, m = txt
         bx, by = r[0] + rx, r[1] + ry
         tx, ty = r[0] - m, r[1] - m

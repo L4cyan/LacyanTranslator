@@ -390,7 +390,7 @@ class Engine(QObject):
         thumb = pyr.thumb()
         dirty = _dirty_rect(self._prev_thumb, thumb, self.cfg.change_threshold)
         for t in self.tracker.tracks:  # keep reading text that's still settling (typewriter effect)
-            if t.stable_count < self.cfg.stable_passes:
+            if t.stable_text != t.block.text:
                 dirty = t.block.rect if dirty is None else _union(dirty, t.block.rect)
         refresh_due = now - self._last_refresh > 3.0
         if dirty is None and not refresh_due and not self._force_ocr:
@@ -439,6 +439,8 @@ class Engine(QObject):
             text = t.block.text
             if t.translated_text == text:
                 continue
+            if t.growing and t.settling(time.time()):
+                continue  # dialogue still typing out: don't flash a remembered translation of half a line
             hit = self.translator.phrase(text) or self.cache.get(text, self.cfg.target_language, self.cfg.model)
             if hit is not None:  # exact known phrase: show it on first sight, no need to wait for it to settle
                 t.stable_text = text
@@ -482,7 +484,7 @@ class Engine(QObject):
                 continue
             fade_in = min(1.0, (now - t.shown_at) / 0.12) if t.shown_at else 1.0
             b = t.block
-            items.append(Item(t.id, b.rect, b.line_h, b.n_lines, t.translation, t.text_color, fade_in, t.moved_now))
+            items.append(Item(t.id, b.rect, b.line_h, b.n_lines, t.translation, t.text_color, fade_in, t.moved_now, b.vertical))
         return items
 
 
