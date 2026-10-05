@@ -19,6 +19,10 @@ same menu labels over and over. Lacyan Translator is built around three ideas:
 - **The translation replaces the original.** Each block gets a feathered blur of the scene behind it,
   the original text colour is kept when it's readable, and boxes grow to fit longer English without
   covering other text on screen.
+- **It moves with the screen.** Translations follow scrolling text frame by frame, vanish the instant
+  their text is covered by a popup or replaced, and come back the moment it reappears.
+- **It's always readable.** Every translation gets a solid outline and soft shadow, keeping the game's
+  own text colour when that colour stands out.
 - **It remembers.** Every translation is stored in a local translation memory, so repeated text
   (menus, item names, common lines) appears instantly, even when the OCR misreads a character.
 
@@ -30,13 +34,17 @@ same menu labels over and over. Lacyan Translator is built around three ideas:
 
 The first launch sets up everything (a few minutes): Python packages, the right GPU runtime for your
 graphics card, and the translation model (Tencent Hunyuan-MT 1.5, 1.8B, about 1.9 GB). After that,
-`LacyanTranslator.bat` starts in a couple of seconds.
+`LacyanTranslator.bat` starts in a couple of seconds, and starts Ollama for you if it isn't running.
+
+Each launch opens a small window: pick the language to translate **to** (English by default), choose
+the active window or the whole screen, and press **Start translating**.
 
 Run your game in **windowed** or **borderless** mode. Exclusive fullscreen can hide overlays.
 
 ## Using it
 
-Lacyan Translator lives in the system tray (the green **译** icon).
+Lacyan Translator lives in the system tray (the green **译** icon). Click it to change languages or
+options while it runs.
 
 | Hotkey | Action |
 | --- | --- |
@@ -82,20 +90,25 @@ screen capture ─▶ change detection ─▶ GPU OCR ─▶ block grouping ─�
                         click-through overlay ◀── blur + fitted text ◀──────────────────┘
 ```
 
-- **Capture**: `mss`, about 10 frames a second, of the active window. The overlay window is excluded
-  from capture (`WDA_EXCLUDEFROMCAPTURE`), so Lacyan Translator always sees the real game underneath.
-- **OCR**: PP-OCRv4 through RapidOCR on ONNX Runtime: CUDA on NVIDIA, DirectML on other GPUs, CPU as
-  a last resort. Text boxes are detected on the full frame, but only boxes in the area that changed
+- **Capture**: `mss`, 30 frames a second while translations are shown (10 when idle), of the active
+  window. The overlay window is excluded from capture (`WDA_EXCLUDEFROMCAPTURE`), so Lacyan Translator
+  always sees the real game underneath.
+- **Following**: every frame, each shown translation checks that its text is still there with a small
+  normalized-correlation match (about 3 ms for the whole frame). Moved text is found again nearby, with
+  the scroll speed used to predict where it went; text that's gone hides on the same frame.
+- **OCR**: PP-OCRv4 through RapidOCR on ONNX Runtime (CUDA on NVIDIA, DirectML on other GPUs, CPU as
+  a last resort), on its own thread so following never waits for it. Text boxes are detected on the full frame, but only boxes in the area that changed
   are read again; everything else reuses the previous reading.
 - **Grouping and tracking**: OCR lines are merged into paragraphs, matched across frames so the
   overlay doesn't flicker, and translated only once their text has been stable for two passes.
 - **Translation**: Hunyuan-MT 1.5 (1.8B) through Ollama, using the model's own prompt format and
   glossary syntax, with a retry when a line comes back untranslated.
-- **Rendering**: a click-through, always-on-top Qt window that draws all backdrops first and then all
-  text, so one block's blur can never cover another block's translation.
+- **Rendering**: a click-through, always-on-top Qt window that repaints only the areas that changed.
+  All backdrops are drawn first and then all text, so one block's blur can never cover another
+  block's translation.
 
-On an RTX 4070 laptop: a dialogue change takes roughly 0.3 s to read and 0.3–0.6 s to translate the
-first time, then 0 ms from memory.
+On an RTX 4070 laptop: scrolling translations stay within 2 px of their text; covered text hides on
+the same frame; a new line of dialogue appears in about 0.8 s the first time and instantly after that.
 
 ## Limits
 

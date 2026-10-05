@@ -46,6 +46,9 @@ class Config:
     keep_original_color: bool = True
     hide_from_capture: bool = True  # keep overlay out of screenshots (also stops Lacyan Translator reading itself)
 
+    # Startup
+    show_launcher: bool = True  # the window with language choice + Start button
+
     # Hotkeys
     hotkey_toggle: str = "alt+t"
     hotkey_pause: str = "alt+p"

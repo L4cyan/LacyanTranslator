@@ -60,8 +60,8 @@ def snapshot(src: str, dst: str) -> int:
     p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
     font = QFont(cfg.font_family)
     font.setWeight(QFont.Weight.DemiBold)
-    layouts: dict = {}
-    render.draw_all(p, frame, items, font, cfg, layouts, obstacles)
+    plans = render.plan_all(frame, items, font, cfg, render.RenderCache(), obstacles, time.time())
+    render.paint_all(p, plans, cfg)
     p.end()
     img.save(dst)
     tr.shutdown()

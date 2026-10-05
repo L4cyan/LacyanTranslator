@@ -11,13 +11,14 @@ from logging.handlers import RotatingFileHandler
 import mss
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon
 
 from . import __version__, model_setup
 from .config import CONFIG_PATH, DATA_DIR, Config, data_path, open_in_explorer
 from .engine import Engine
 from .hotkeys import Hotkeys
 from .langs import TARGETS
+from .launcher import LaunchDialog, logo
 from .overlay import Overlay
 
 log = logging.getLogger("lacyan")
@@ -53,9 +54,9 @@ class Bridge(QObject):
 
 
 class TranslatorApp:
-    def __init__(self, app: QApplication) -> None:
+    def __init__(self, app: QApplication, cfg: Config) -> None:
         self.app = app
-        self.cfg = Config.load()
+        self.cfg = cfg
         self.bridge = Bridge()
         self.bridge.call.connect(lambda fn: fn())
         with mss.mss() as sct:
@@ -82,7 +83,7 @@ class TranslatorApp:
     def _prepare(self) -> None:
         local_ollama = "127.0.0.1:11434" in self.cfg.endpoint or "localhost:11434" in self.cfg.endpoint
         if local_ollama and self.cfg.model == model_setup.MODEL_NAME:
-            if model_setup.ollama_models() is None:
+            if not model_setup.start_ollama():
                 self._notify("Ollama isn't running", "Start Ollama, then Lacyan Translator will connect automatically.")
                 while model_setup.ollama_models() is None:
                     threading.Event().wait(5)
@@ -114,24 +115,29 @@ class TranslatorApp:
         self.status_action = m.addAction("Starting…")
         self.status_action.setEnabled(False)
         m.addSeparator()
+        m.addAction("Languages && options…", self.open_options)
         self.pause_action = m.addAction("Pause", self.toggle_pause)
         self.toggle_action = m.addAction("Show original text", self.toggle_overlay)
 
         lang_menu = m.addMenu("Translate to")
         group = QActionGroup(lang_menu)
+        self.lang_actions = {}
         for name in TARGETS:
             a = QAction(name, lang_menu, checkable=True, checked=name == self.cfg.target_language)
             a.triggered.connect(lambda _=False, n=name: self.set_target(n))
             group.addAction(a)
             lang_menu.addAction(a)
+            self.lang_actions[name] = a
 
         cap_menu = m.addMenu("Capture")
         cgroup = QActionGroup(cap_menu)
+        self.cap_actions = {}
         for key, label in (("foreground", "Active window"), ("monitor", "Whole screen")):
             a = QAction(label, cap_menu, checkable=True, checked=self.cfg.capture == key)
             a.triggered.connect(lambda _=False, k=key: self.set_capture(k))
             cgroup.addAction(a)
             cap_menu.addAction(a)
+            self.cap_actions[key] = a
 
         m.addSeparator()
         m.addAction("Open settings file", lambda: open_in_explorer(CONFIG_PATH))
@@ -141,7 +147,7 @@ class TranslatorApp:
         m.addAction("Quit", self.quit)
         self.menu = m
         self.tray.setContextMenu(m)
-        self.tray.activated.connect(lambda r: self.toggle_pause() if r == QSystemTrayIcon.ActivationReason.DoubleClick else None)
+        self.tray.activated.connect(lambda r: self.open_options() if r == QSystemTrayIcon.ActivationReason.Trigger else None)
         timer = QTimer(self.app)
         timer.timeout.connect(self._refresh_status)
         timer.start(1000)
@@ -154,6 +160,16 @@ class TranslatorApp:
         self.status_action.setText(f"{state} · {s['translated']} new / {s['cached']} from memory")
 
     # --- actions -----------------------------------------------------------
+    def open_options(self) -> None:
+        if getattr(self, "_dialog", None) and self._dialog.isVisible():
+            self._dialog.raise_()
+            return
+        self._dialog = LaunchDialog(self.cfg, running=True)
+        if self._dialog.exec():
+            self.set_target(self.cfg.target_language)
+            self.set_capture(self.cfg.capture)
+        self._dialog = None
+
     def toggle_overlay(self) -> None:
         self.overlay_on = not self.overlay_on
         self.overlay.setVisible(self.overlay_on)
@@ -171,12 +187,16 @@ class TranslatorApp:
     def set_target(self, name: str) -> None:
         self.cfg.target_language = name
         self.cfg.save()
+        if name in self.lang_actions:
+            self.lang_actions[name].setChecked(True)
         if self.engine:
             self.engine.set_target(name)
 
     def set_capture(self, key: str) -> None:
         self.cfg.capture = key
         self.cfg.save()
+        if key in self.cap_actions:
+            self.cap_actions[key].setChecked(True)
 
     def clear_cache(self) -> None:
         if self.engine:
@@ -207,7 +227,12 @@ def run() -> int:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Lacyan Translator")
-    translator_app = TranslatorApp(app)  # noqa: F841 (kept alive by the event loop)
+    app.setWindowIcon(QIcon(logo(64)))
+    cfg = Config.load()
+    if cfg.show_launcher and LaunchDialog(cfg).exec() != QDialog.DialogCode.Accepted:
+        ctypes.windll.kernel32.CloseHandle(mutex)
+        return 0
+    translator_app = TranslatorApp(app, cfg)  # noqa: F841 (kept alive by the event loop)
     code = app.exec()
     ctypes.windll.kernel32.CloseHandle(mutex)
     return code

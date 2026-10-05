@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 
@@ -37,6 +39,30 @@ def ollama_models(host: str = "http://127.0.0.1:11434") -> list[str] | None:
         return None
 
 
+def ollama_exe() -> str | None:
+    found = shutil.which("ollama")
+    if found:
+        return found
+    default = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
+    return str(default) if default.exists() else None
+
+
+def start_ollama(wait_s: float = 20.0) -> bool:
+    """Start the Ollama server in the background if it isn't running. Returns True once it answers."""
+    if ollama_models() is not None:
+        return True
+    exe = ollama_exe()
+    if not exe:
+        return False
+    subprocess.Popen([exe, "serve"], creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        if ollama_models() is not None:
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def ensure_model(name: str = MODEL_NAME) -> str:
     """Returns 'ok', 'created', 'no-ollama' or 'failed'."""
     models = ollama_models()
@@ -44,7 +70,7 @@ def ensure_model(name: str = MODEL_NAME) -> str:
         return "no-ollama"
     if any(m.split(":")[0] == name for m in models):
         return "ok"
-    exe = shutil.which("ollama")
+    exe = ollama_exe()
     if not exe:
         return "no-ollama"
     try:

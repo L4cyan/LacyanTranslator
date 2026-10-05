@@ -4,4 +4,4 @@ Capture the screen, find foreign text with GPU OCR, translate it with a local mo
 and paint the translation over the original behind a soft blur.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

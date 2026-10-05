@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import itertools
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 
 from .layout import Block
+from .motion import Ref
 
 _ids = itertools.count(1)
 
@@ -39,12 +40,20 @@ class Track:
     requested_text: str = ""
     misses: int = 0
     shown_at: float = 0.0
-    lost_at: float = 0.0
     text_color: tuple[int, int, int] | None = None
+    # per-frame following
+    ref: Ref | None = None  # picture of the text the shown translation belongs to
+    cand_ref: Ref | None = None  # picture of the latest OCR'd text (becomes `ref` when its translation lands)
+    bad: int = 0  # consecutive frames the text wasn't found
+    hidden: bool = False
 
     @property
     def visible(self) -> bool:
-        return self.translation is not None
+        return self.translation is not None and not self.hidden
+
+    def move(self, dx: int, dy: int) -> None:
+        b = self.block
+        self.block = replace(b, x0=b.x0 + dx, y0=b.y0 + dy, x1=b.x1 + dx, y1=b.y1 + dy)
 
 
 class Tracker:
@@ -53,20 +62,21 @@ class Tracker:
         self.stable_passes = stable_passes
         self.keep_missing = keep_missing
 
-    def update(self, blocks: list[Block]) -> list[Track]:
-        """Match this pass's blocks to existing tracks. Returns tracks whose text just became stable."""
-        now = time.time()
+    def update(self, blocks: list[Block], refs: list[Ref | None]) -> list[Track]:
+        """Match this pass's blocks (already moved to where they are *now*) to tracks.
+
+        Returns tracks whose text just became stable and needs a translation.
+        """
         unmatched = list(self.tracks)
         ready: list[Track] = []
-        for b in blocks:
+        for b, ref in zip(blocks, refs):
             best, best_score = None, 0.0
             for t in unmatched:
                 overlap = iou(b.rect, t.block.rect)
                 sim = similar(b.text, t.block.text)
-                # a growing typewriter line overlaps a lot and starts with the old text
                 grows = b.text.startswith(t.block.text[: max(1, len(t.block.text) - 1)])
                 score = overlap * 0.6 + sim * 0.4 + (0.2 if grows and overlap > 0.2 else 0)
-                if score > best_score and (overlap > 0.25 or sim > 0.85):
+                if score > best_score and (overlap > 0.25 or (sim > 0.85 and overlap > 0)):
                     best, best_score = t, score
             if best is None:
                 best = Track(block=b)
@@ -74,23 +84,29 @@ class Tracker:
             else:
                 unmatched.remove(best)
             t = best
-            if t.lost_at:
-                t.lost_at = 0.0
             t.misses = 0
-            if similar(b.text, t.block.text) >= 0.97:
-                t.stable_count += 1
-            else:
-                t.stable_count = 1
+            t.stable_count = t.stable_count + 1 if similar(b.text, t.block.text) >= 0.97 else 1
             t.block = b
+            if ref is not None:
+                t.cand_ref = ref
             if t.stable_count >= self.stable_passes and t.stable_text != b.text:
                 t.stable_text = b.text
                 ready.append(t)
         for t in unmatched:
             t.misses += 1
-            if not t.lost_at:
-                t.lost_at = now
         self.tracks = [t for t in self.tracks if t.misses <= self.keep_missing]
         return ready
 
     def clear(self) -> None:
         self.tracks.clear()
+
+
+def show(track: Track, text: str, translation: str) -> None:
+    """A translation is ready for `text`: display it and start following that text."""
+    if track.translation is None:
+        track.shown_at = time.time()
+    track.translation = translation
+    track.translated_text = text
+    track.ref = track.cand_ref
+    track.bad = 0
+    track.hidden = False
