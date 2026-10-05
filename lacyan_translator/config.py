@@ -21,7 +21,7 @@ class Config:
     # Translation backend (any OpenAI-compatible server; Ollama by default)
     endpoint: str = "http://127.0.0.1:11434/v1"
     api_key: str = ""
-    model: str = "lacyan-mt"
+    model: str = "lacyan-mt:q6"
     prompt_style: str = "auto"  # auto | hymt | chat
     glossary_files: list[str] = field(default_factory=lambda: ["glossaries/xianxia.txt"])
     # Exact-match phrasebooks: a block that is exactly one of these is replaced without asking the model.

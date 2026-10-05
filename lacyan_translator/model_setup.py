@@ -14,8 +14,27 @@ from pathlib import Path
 
 log = logging.getLogger("lacyan.setup")
 
-BASE_MODEL = "hf.co/tencent/HY-MT1.5-1.8B-GGUF:Q8_0"
+REPO = "hf.co/tencent/HY-MT1.5-1.8B-GGUF"
 MODEL_NAME = "lacyan-mt"
+
+# The same translation model at three sizes. Smaller = faster and lighter on the GPU, slightly rougher.
+VARIANTS = {
+    "q4": {"file": "Q4_K_M", "label": "Fast (Q4 · about 1.1 GB)"},
+    "q6": {"file": "Q6_K", "label": "Balanced (Q6 · about 1.5 GB)"},
+    "q8": {"file": "Q8_0", "label": "Best quality (Q8 · about 1.9 GB)"},
+}
+
+
+def model_name(variant: str) -> str:
+    return f"{MODEL_NAME}:{variant}"
+
+
+def variant_of(model: str) -> str | None:
+    """'lacyan-mt:q4' -> 'q4'; the original untagged 'lacyan-mt' was the Q8 build."""
+    if not model.startswith(MODEL_NAME):
+        return None
+    tag = model.split(":", 1)[1] if ":" in model else "q8"
+    return tag if tag in VARIANTS else "q8"
 
 # Ollama's automatic template for this GGUF is broken, so we supply the real Hunyuan chat format.
 # Lacyan Translator builds the official translation prompt itself; the template passes the last user message through.
@@ -65,22 +84,33 @@ def start_ollama(wait_s: float = 20.0) -> bool:
     return False
 
 
-def ensure_model(name: str = MODEL_NAME) -> str:
-    """Returns 'ok', 'created', 'no-ollama' or 'failed'."""
+def has_model(name: str, models: list[str] | None = None) -> bool:
+    models = ollama_models() if models is None else models
+    if models is None:
+        return False
+    want = name if ":" in name else name + ":latest"
+    return any(m == want for m in models)
+
+
+def ensure_model(name: str = MODEL_NAME + ":q6") -> str:
+    """Make sure the Ollama model `name` (e.g. 'lacyan-mt:q4') exists, downloading it if needed.
+    Returns 'ok', 'created', 'no-ollama' or 'failed'."""
     models = ollama_models()
     if models is None:
         return "no-ollama"
-    if any(m.split(":")[0] == name for m in models):
+    if has_model(name, models):
         return "ok"
     exe = ollama_exe()
     if not exe:
         return "no-ollama"
+    variant = variant_of(name) or "q8"
+    base = f"{REPO}:{VARIANTS[variant]['file']}"
     try:
-        log.info("Downloading %s (about 1.9 GB)...", BASE_MODEL)
-        subprocess.run([exe, "pull", BASE_MODEL], check=True, capture_output=True, creationflags=0x08000000)
+        log.info("Downloading %s ...", base)
+        subprocess.run([exe, "pull", base], check=True, capture_output=True, creationflags=0x08000000)
         with tempfile.TemporaryDirectory() as tmp:
             mf = Path(tmp) / "Modelfile"
-            mf.write_text(MODELFILE.format(base=BASE_MODEL), encoding="utf-8")
+            mf.write_text(MODELFILE.format(base=base), encoding="utf-8")
             subprocess.run([exe, "create", name, "-f", str(mf)], check=True, capture_output=True, creationflags=0x08000000)
         log.info("Created model %s", name)
         return "created"

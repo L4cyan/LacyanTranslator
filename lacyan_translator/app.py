@@ -84,14 +84,14 @@ class TranslatorApp:
     # --- startup -----------------------------------------------------------
     def _prepare(self) -> None:
         local_ollama = "127.0.0.1:11434" in self.cfg.endpoint or "localhost:11434" in self.cfg.endpoint
-        if local_ollama and self.cfg.model == model_setup.MODEL_NAME:
+        if local_ollama and model_setup.variant_of(self.cfg.model) is not None:
             if not model_setup.start_ollama():
                 self._notify("Ollama isn't running", "Start Ollama, then Lacyan Translator will connect automatically.")
                 while model_setup.ollama_models() is None:
                     threading.Event().wait(5)
-            if not any(m.split(":")[0] == self.cfg.model for m in model_setup.ollama_models() or []):
-                self._notify("Setting up", "Downloading the translation model (about 1.9 GB, first run only)…")
-                result = model_setup.ensure_model()
+            if not model_setup.has_model(self.cfg.model):
+                self._notify("Setting up", "Downloading the translation model (first time only)…")
+                result = model_setup.ensure_model(self.cfg.model)
                 if result not in ("ok", "created"):
                     self._notify("Model setup failed", "See data/lacyan.log for details.")
                     return
@@ -166,11 +166,30 @@ class TranslatorApp:
         if getattr(self, "_dialog", None) and self._dialog.isVisible():
             self._dialog.raise_()
             return
+        before = self.cfg.model
         self._dialog = LaunchDialog(self.cfg, running=True)
         if self._dialog.exec():
             self.set_target(self.cfg.target_language)
             self.set_capture(self.cfg.capture)
+            if self.cfg.model != before:
+                threading.Thread(target=self._switch_model, args=(before,), daemon=True).start()
         self._dialog = None
+
+    def _switch_model(self, previous: str) -> None:
+        """Download the newly chosen model size if needed, then switch to it (keep the old one meanwhile)."""
+        chosen = self.cfg.model
+        if not model_setup.has_model(chosen):
+            self.cfg.model = previous
+            self._notify("Downloading", "Getting the new translation model; it switches over when ready.")
+            if model_setup.ensure_model(chosen) not in ("ok", "created"):
+                self._notify("Download failed", "Kept the previous model. See data/lacyan.log.")
+                self.cfg.save()
+                return
+            self.cfg.model = chosen
+        self.cfg.save()
+        if self.engine:
+            self.bridge.call.emit(self.engine.reset)
+        self._notify("Model switched", f"Now translating with {chosen}.")
 
     def toggle_overlay(self) -> None:
         self.overlay_on = not self.overlay_on

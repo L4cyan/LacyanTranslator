@@ -12,9 +12,9 @@ from dataclasses import dataclass
 
 # What each profile changes. Higher = smoother and faster to fill a page, but more GPU/CPU while you play.
 PROFILES: dict[str, dict] = {
-    "Low": {"max_fps": 20, "translation_workers": 1, "batch_size": 6, "ocr_interval_ms": 600},
-    "Balanced": {"max_fps": 30, "translation_workers": 1, "batch_size": 8, "ocr_interval_ms": 350},
-    "High": {"max_fps": 60, "translation_workers": 2, "batch_size": 10, "ocr_interval_ms": 200},
+    "Low": {"max_fps": 20, "translation_workers": 1, "batch_size": 6, "ocr_interval_ms": 600, "model_size": "q4"},
+    "Balanced": {"max_fps": 30, "translation_workers": 1, "batch_size": 8, "ocr_interval_ms": 350, "model_size": "q6"},
+    "High": {"max_fps": 60, "translation_workers": 2, "batch_size": 10, "ocr_interval_ms": 200, "model_size": "q6"},
 }
 
 DESCRIPTIONS = {
@@ -96,7 +96,13 @@ def detect() -> Hardware:
     return Hardware(gpu, vram, nvidia, _cpu_name(), os.cpu_count() or 4, _ram_gb())
 
 
-def apply_profile(cfg, name: str) -> None:
+def apply_profile(cfg, name: str, model_size: str | None = None) -> None:
+    """Apply a profile's settings. The translation model size follows the profile unless one is given."""
+    from .model_setup import model_name, variant_of
+
     cfg.profile = name
     for k, v in PROFILES[name].items():
-        setattr(cfg, k, v)
+        if k != "model_size":
+            setattr(cfg, k, v)
+    if variant_of(cfg.model) is not None:  # only when using the bundled local model, not a custom endpoint
+        cfg.model = model_name(model_size or PROFILES[name]["model_size"])

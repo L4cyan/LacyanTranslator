@@ -127,6 +127,17 @@ class LaunchDialog(QDialog):
         self.perf_hint.setWordWrap(True)
         self.perf.currentTextChanged.connect(lambda n: self.perf_hint.setText(hardware.DESCRIPTIONS[n]))
 
+        model_label = QLabel("TRANSLATION MODEL")
+        model_label.setObjectName("field")
+        self.model = QComboBox()
+        for key, v in model_setup.VARIANTS.items():
+            self.model.addItem(v["label"], key)
+        current = model_setup.variant_of(cfg.model)
+        self.model.setEnabled(current is not None)  # a custom endpoint/model is left alone
+        self._select_model(current or hardware.PROFILES[self.perf.currentText()]["model_size"])
+        self.perf.currentTextChanged.connect(lambda n: self._select_model(hardware.PROFILES[n]["model_size"]))
+        self.model.currentIndexChanged.connect(lambda _i: self._model_status())
+
         self.status = QLabel("Checking the translation model…")
         self.status.setObjectName("status")
         self.status.setWordWrap(True)
@@ -160,6 +171,8 @@ class LaunchDialog(QDialog):
         root.addWidget(perf_label)
         root.addWidget(self.perf)
         root.addWidget(self.perf_hint)
+        root.addWidget(model_label)
+        root.addWidget(self.model)
         root.addWidget(self.status)
         root.addWidget(hint)
         root.addWidget(self.again)
@@ -182,16 +195,31 @@ class LaunchDialog(QDialog):
             if not model_setup.start_ollama():
                 self._check.done.emit("bad", "Ollama isn't installed or won't start. Install it from ollama.com, then reopen this.")
                 return
-        models = model_setup.ollama_models() or []
-        if any(m.split(":")[0] == self.cfg.model for m in models):
-            self._check.done.emit("ok", "Translation model ready. Everything runs on this PC.")
-        else:
-            self._check.done.emit("ok", "First start: the translation model (about 1.9 GB) downloads once after you press Start.")
+        self._models = model_setup.ollama_models() or []
+        self._check.done.emit("model", "")
 
     def _uses_local_ollama(self) -> bool:
         return any(h in self.cfg.endpoint for h in ("127.0.0.1:11434", "localhost:11434"))
 
+    def _select_model(self, key: str) -> None:
+        i = self.model.findData(key)
+        if i >= 0:
+            self.model.setCurrentIndex(i)
+
+    def _model_status(self) -> None:
+        if getattr(self, "_models", None) is None or not self.model.isEnabled():
+            return
+        name = model_setup.model_name(self.model.currentData())
+        if model_setup.has_model(name, self._models):
+            self._show_status("ok", "Translation model ready. Everything runs on this PC.")
+        else:
+            size = self.model.currentText().split("about ")[-1].rstrip(")")
+            self._show_status("ok", f"This model size downloads once ({size}) when you press Start.")
+
     def _show_status(self, level: str, message: str) -> None:
+        if level == "model":
+            self._model_status()
+            return
         colors = {"ok": "#7fd6b5", "wait": "#e3c26c", "bad": "#f0918a"}
         self.status.setStyleSheet(f"color: {colors.get(level, '#d9e2de')};")
         self.status.setText(message)
@@ -201,7 +229,7 @@ class LaunchDialog(QDialog):
         self.cfg.target_language = self.dst.currentText()
         self.cfg.capture = "monitor" if self.cap_screen.isChecked() else "foreground"
         self.cfg.show_launcher = self.again.isChecked()
-        hardware.apply_profile(self.cfg, self.perf.currentText())
+        hardware.apply_profile(self.cfg, self.perf.currentText(), self.model.currentData())
         self.cfg.save()
         self.accept()
 
