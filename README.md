@@ -33,15 +33,28 @@ same menu labels over and over. Lacyan Translator is built around three ideas:
 - **It remembers.** Every translated phrase is stored in a local translation memory and shown instantly
   the next time the exact same phrase appears. Shopping and game UI phrasebooks cover common words.
 
-## Quick start
+## Install
 
-1. Install [Ollama](https://ollama.com) and leave it running.
-2. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/).
-3. Download this repository and double-click **`LacyanTranslator.bat`**.
+1. Download **[LacyanTranslator-Setup.exe](https://github.com/L4cyan/LacyanTranslator/releases/latest/download/LacyanTranslator-Setup.exe)**
+   from the [latest release](https://github.com/L4cyan/LacyanTranslator/releases/latest).
+2. Run it and click **Install**. That's it.
 
-The first launch sets up everything (a few minutes): Python packages, the right GPU runtime for your
-graphics card, and the translation model (Tencent Hunyuan-MT 1.5, 1.8B, about 1.9 GB). After that,
-`LacyanTranslator.bat` starts in a couple of seconds, and starts Ollama for you if it isn't running.
+The setup installs everything for you: its own private copy of Python and every component, GPU
+acceleration for your graphics card, [Ollama](https://ollama.com) if you don't have it, and the
+translation model. No administrator rights are needed, and it doesn't touch any Python you already have.
+
+You choose how much to download:
+
+| Option | Download | |
+| --- | --- | --- |
+| **Fastest model only** (default) | about 1.1 GB | The fast model (Q4); quick and good for games and shops |
+| Install all model sizes | about 4.5 GB | Fast, Balanced and Best quality, switchable any time in the app |
+
+NVIDIA users can also tick CUDA acceleration (about 1.5 GB more) for the fastest text reading; everyone
+else gets DirectML, which works on any GPU. Uninstall any time from Windows Settings → Apps.
+
+Windows SmartScreen may warn about an unknown publisher, because the setup isn't code-signed yet:
+click **More info → Run anyway**.
 
 On first launch it checks your hardware (GPU, graphics memory, CPU, RAM) and recommends a performance
 profile, which you confirm:
@@ -138,6 +151,8 @@ while scrolling and 0.3 ms on a still screen.
 
 ## Developing
 
+Run from source with `LacyanTranslator.bat` (it sets up a local environment on first run), or:
+
 ```
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt "onnxruntime-gpu[cuda,cudnn]"
@@ -146,6 +161,7 @@ python -m venv .venv
 ```
 
 Logs go to `data/lacyan.log`; the translation memory is `data/translations.sqlite`.
+Build the installer with `python installer/build.py` (output: `installer/dist/LacyanTranslator-Setup.exe`).
 
 ## License
 

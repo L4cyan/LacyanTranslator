@@ -5,3 +5,9 @@ data/
 config.json
 bench*.png
 crop_*.png
+
+# installer build output
+installer/build/
+installer/dist/
+installer/.venv-build/
+installer/test-install/

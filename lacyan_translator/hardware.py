@@ -105,4 +105,13 @@ def apply_profile(cfg, name: str, model_size: str | None = None) -> None:
         if k != "model_size":
             setattr(cfg, k, v)
     if variant_of(cfg.model) is not None:  # only when using the bundled local model, not a custom endpoint
-        cfg.model = model_name(model_size or PROFILES[name]["model_size"])
+        if model_size:
+            cfg.model = model_name(model_size)
+        else:
+            # Follow the profile's size only if it's installed; someone who installed just the fast model
+            # keeps it instead of triggering a surprise download.
+            from .model_setup import has_model
+
+            wanted = model_name(PROFILES[name]["model_size"])
+            if has_model(wanted):
+                cfg.model = wanted

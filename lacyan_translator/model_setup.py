@@ -117,3 +117,40 @@ def ensure_model(name: str = MODEL_NAME + ":q6") -> str:
     except subprocess.CalledProcessError as e:
         log.error("Model setup failed: %s", (e.stderr or b"")[-400:])
         return "failed"
+
+
+def install_cli(variants: list[str]) -> int:
+    """Used by the Windows installer: download/create the given model sizes, printing progress lines."""
+    exe = ollama_exe()
+    if not exe or not start_ollama(60):
+        print("ERROR: Ollama is not running", flush=True)
+        return 2
+    for v in variants:
+        name = model_name(v)
+        if has_model(name):
+            print(f"{name}: already installed", flush=True)
+            continue
+        base = f"{REPO}:{VARIANTS[v]['file']}"
+        print(f"Downloading {VARIANTS[v]['label']}", flush=True)
+        proc = subprocess.Popen([exe, "pull", base], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                creationflags=0x08000000, text=True, encoding="utf-8", errors="replace")
+        for chunk in iter(lambda: proc.stdout.read(256), ""):
+            for part in chunk.replace("\r", "\n").split("\n"):
+                part = part.strip()
+                if "%" in part:
+                    print("PROGRESS " + part, flush=True)
+        if proc.wait() != 0:
+            print(f"ERROR: download of {base} failed", flush=True)
+            return 1
+        with tempfile.TemporaryDirectory() as tmp:
+            mf = Path(tmp) / "Modelfile"
+            mf.write_text(MODELFILE.format(base=base), encoding="utf-8")
+            subprocess.run([exe, "create", name, "-f", str(mf)], check=True, capture_output=True, creationflags=0x08000000)
+        print(f"{name}: ready", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(install_cli(sys.argv[1:] or ["q4"]))
